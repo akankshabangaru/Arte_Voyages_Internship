@@ -46,13 +46,13 @@ Uses booking dependencies and predicted reliability to prioritise requests and b
 #Technologies
 
 Depending on the use case, the project uses:
-Python
-Pandas and NumPy
-Scikit-learn
-Sentence Transformers and NLP
-FastAPI
-PostgreSQL
-Streamlit
-Plotly and Matplotlib
-Git and GitHub
-Additional libraries and data sources are selected according to individual module requirements.
+Python,
+Pandas and NumPy,
+Scikit-learn,
+Sentence Transformers and NLP,
+FastAPI,
+PostgreSQL,
+Streamlit,
+Plotly and Matplotlib,
+Git and GitHub, and
+additional libraries and data sources are selected according to individual module requirements.
