@@ -3,4 +3,5 @@
 #Use Cases
 
 1.Multi-Country Itinerary Compatibility Checker
+
 2.Itinerary Redundancy Detector
