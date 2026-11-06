@@ -1,0 +1,10 @@
+pandas
+numpy
+streamlit
+plotly
+pytest
+rapidfuzz
+requests
+libsql-client
+python-dotenv
+folium
