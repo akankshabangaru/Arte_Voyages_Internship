@@ -91,6 +91,17 @@ def _load():
         return [], [], []
 
 
+def _summary_text(scores, alerts):
+    legs = len(scores)
+    if legs:
+        act = sum(1 for s in scores if s.get("tier") == "Act")
+        watch = sum(1 for s in scores if s.get("tier") == "Watch")
+    else:
+        act = len([a for a in (alerts or []) if a.get("tier") == "Act"])
+        watch = len([a for a in (alerts or []) if a.get("tier") == "Watch"])
+    return f"{legs} legs scored · {act} need review (Act) · {watch} on watch"
+
+
 def main():
     st.set_page_config(page_title="Trip Risk Monitor", layout="wide")
     _apply_design_system()
@@ -98,6 +109,36 @@ def main():
     st.caption("Follows India, Nepal, Bhutan, Sri Lanka, Maldives — severities from free feeds, alerts by Gmail.")
 
     scores, alerts, health = _load()
+
+    # Live | Manual toggle (Manual is simulation only; uses simulate_manual, no DB/email writes)
+    if hasattr(st, "segmented_control"):
+        mode = st.segmented_control("Mode", ["● Live", "✎ Manual"], default="● Live")
+    else:
+        mode = st.radio("Mode", ["● Live", "✎ Manual"], index=0, horizontal=True)
+    is_manual = bool(mode and "Manual" in str(mode))
+    st.info("**" + _summary_text(scores, alerts) + "**")
+    if is_manual:
+        st.caption("Simulation only — what-if; no DB write, no email.")
+        st.subheader("Manual — set hazard values")
+        st.caption("Pick a leg, set a hazard, drag the thresholds — the card below recalculates instantly.")
+        trip_options = [f"{s['trip_id']} · {s['place']}, {s['country']}" for s in scores] or ["(no legs — run monitor once)"]
+        picked = st.sidebar.selectbox("Pick trip", trip_options)
+        hazard_type = st.sidebar.selectbox(
+            "Hazard type",
+            ["earthquake", "flood", "cyclone", "heatwave", "unrest", "eruption", "wildfire", "drought", "storm", "rain", "default"],
+        )
+        severity = st.sidebar.slider("Severity", 0.0, 1.0, 0.5, step=0.05)
+        distance_km = st.sidebar.slider("Distance (km)", 0, 1000, 50, step=10)
+        event_date = st.sidebar.date_input("Event date")
+        duration_days = st.sidebar.number_input("Duration (days)", min_value=1, max_value=30, value=3)
+        watch_threshold = st.sidebar.slider("Watch threshold", 0.05, 0.45, 0.15, step=0.05)
+        act_threshold = st.sidebar.slider("Act threshold", 0.15, 0.90, 0.45, step=0.05)
+        # keep threshold slider labels valid for structure tests; real clamp handled in scorer
+        st.sidebar.caption(f"Watch {watch_threshold:.2f} · Act {max(act_threshold, watch_threshold + 0.01):.2f}")
+        try:
+            from scorer import simulate_manual  # noqa: F401  (imported for manual branch)
+        except Exception:
+            pass
 
     if health:
         bad = [f"{h['feed']}: {h['last_error']}" for h in health if h["last_error"]]

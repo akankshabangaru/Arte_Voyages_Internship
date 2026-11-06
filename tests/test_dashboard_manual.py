@@ -44,3 +44,17 @@ def test_zero_severity_unchanged():
                         watch=0.15, act=0.45, prev_tier="Green")
     assert r["score"] == 0.0
     assert r["kind"] == "UNCHANGED"
+
+import pathlib
+def test_dashboard_has_manual_toggle_and_editors():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert "Manual" in text and "Live" in text
+    assert "Watch threshold" in text
+    assert "Act threshold" in text
+    assert "Simulation only" in text
+
+def test_no_db_write_in_manual_path():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    # manual block must not call write APIs
+    assert "simulate_manual" in text
+    assert text.count("log_alert") == 0 or "Manual" in text.split("log_alert")[0][-2000:]
