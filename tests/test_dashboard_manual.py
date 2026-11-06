@@ -58,3 +58,21 @@ def test_no_db_write_in_manual_path():
     # manual block must not call write APIs
     assert "simulate_manual" in text
     assert text.count("log_alert") == 0 or "Manual" in text.split("log_alert")[0][-2000:]
+
+from dashboard import _group_alerts, _load_legs_fallback
+
+def test_grouping_order_tier_times_change():
+    arr = [
+        {"tier": "Green", "kind": "DE-ESCALATED", "score": 0.0},
+        {"tier": "Act", "kind": "ESCALATED", "score": 0.80},
+        {"tier": "Watch", "kind": "ESCALATED", "score": 0.30},
+        {"tier": "Green", "kind": "UNCHANGED", "score": 0.0},
+    ]
+    groups = _group_alerts(arr)
+    assert groups[0][0]["tier"] == "Act"
+    assert groups[1][0]["tier"] == "Watch"
+
+def test_fallback_legs_parse_without_monitor():
+    legs = _load_legs_fallback("trips.csv")
+    assert len(legs) >= 1
+    assert hasattr(legs[0], "trip_id")
