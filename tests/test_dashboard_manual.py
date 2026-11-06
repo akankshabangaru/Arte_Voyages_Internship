@@ -140,3 +140,8 @@ def test_ornament_is_brass_line_not_glyph():
     assert "content: '✦'" not in text
     assert "@import url('https://fonts.googleapis.com/css2?family=Playfair+Display" in text
     assert "family=Source+Sans+3" in text
+
+def test_serif_font_uses_important():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert 'font-family: "Playfair Display", Georgia, serif !important' in text
+    assert '@import url(' in text

@@ -53,9 +53,9 @@ def _apply_design_system() -> None:
         }}
         .stApp {{ background-color: var(--color-background); color: var(--color-text); }} header[data-testid="stHeader"], [data-testid="stDecoration"] {{ background-color: var(--color-background) !important; }}
         .block-container {{ padding-top: 1.5rem; max-width: 1280px; }}
-        h1 {{ font-family: "Playfair Display", Georgia, serif; font-weight: 700; color: var(--color-text); letter-spacing: -0.01em; }}
+        h1, .stApp h1, [data-testid="stHeading"] h1 {{ font-family: "Playfair Display", Georgia, serif !important; font-weight: 700; color: var(--color-text); letter-spacing: -0.01em; }}
         h1::after, h2::after {{ content: ""; display: block; width: 56px; height: 3px; background: var(--color-secondary); border-radius: 2px; margin-top: 8px; }}
-        h2, h3 {{ font-family: "Source Sans 3", system-ui, -apple-system, sans-serif; font-weight: 600; color: var(--color-text); }}
+        h2, h3, .stApp h2, .stApp h3 {{ font-family: "Source Sans 3", system-ui, -apple-system, sans-serif !important; font-weight: 600; color: var(--color-text); }}
         .stCaption {{ color: var(--color-muted); }}
         [data-testid="stMetric"] {{
             background: var(--color-surface); border: 1px solid var(--color-border);
