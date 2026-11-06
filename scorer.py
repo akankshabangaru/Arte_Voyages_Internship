@@ -68,8 +68,8 @@ def noisy_or(values) -> float:
     return 1 - p
 
 
-def tier_of(score: float) -> str:
-    return "Act" if score >= ACT else "Watch" if score >= WATCH else "Green"
+def tier_of(score: float, watch: float = 0.15, act: float = 0.45) -> str:
+    return "Act" if score >= act else "Watch" if score >= watch else "Green"
 
 
 def leg_signals(leg: Leg, events: list[Event], as_of: date) -> list[dict]:
@@ -85,3 +85,63 @@ def leg_signals(leg: Leg, events: list[Event], as_of: date) -> list[dict]:
 
 def leg_score_from_signals(sigs: list[dict]) -> float:
     return noisy_or(s["risk"] for s in sigs)
+
+
+def simulate_manual(
+    leg: Leg,
+    hazard_type: str,
+    severity: float,
+    distance_km: float,
+    event_date: date,
+    duration_days: int,
+    confidence: float,
+    watch: float,
+    act: float,
+    prev_tier: str,
+) -> dict:
+    severity = min(1.0, max(0.0, float(severity)))
+    distance_km = min(1000.0, max(0.0, float(distance_km)))
+    if act <= watch:
+        act = min(0.90, watch + 0.01)
+    r = RADIUS_KM.get(hazard_type, RADIUS_KM["default"])
+    proximity_value = 0.0 if distance_km > 3 * r else math.exp(-distance_km / r)
+    event = Event(
+        event_id="manual",
+        date=event_date,
+        issued=None,
+        country=leg.country,
+        type=hazard_type,
+        severity=severity,
+        lat=leg.lat,
+        lon=leg.lon,
+        duration_days=int(duration_days),
+        confidence=float(confidence),
+        title=f"{hazard_type} (severity {severity:.2f})",
+        url="",
+        source="manual",
+    )
+    overlap = time_overlap(event, leg)
+    risk = severity * proximity_value * overlap * float(confidence)
+    score = noisy_or([risk])
+    tier = tier_of(score, watch=watch, act=act)
+    if leg.end < event_date:
+        kind = "CLOSED"
+    else:
+        prev_rank = TIERS.index(prev_tier) if prev_tier in TIERS else 0
+        new_rank = TIERS.index(tier)
+        if new_rank > prev_rank:
+            kind = "ESCALATED"
+        elif new_rank < prev_rank:
+            kind = "DE-ESCALATED"
+        else:
+            kind = "UNCHANGED"
+    return {
+        "score": score,
+        "tier": tier,
+        "prev_tier": prev_tier,
+        "kind": kind,
+        "driver": f"{hazard_type} (severity {severity:.2f})",
+        "proximity": proximity_value,
+        "time_overlap": overlap,
+        "risk": risk,
+    }
