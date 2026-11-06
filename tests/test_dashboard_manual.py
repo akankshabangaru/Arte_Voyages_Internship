@@ -145,3 +145,16 @@ def test_serif_font_uses_important():
     text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
     assert 'font-family: "Playfair Display", Georgia, serif !important' in text
     assert '@import url(' in text
+
+from dashboard import _trip_rows_from_sims
+
+def test_trip_rows_from_sims_highlights_picked():
+    sims = [
+        {"trip_id": "DELHI-01", "place": "Delhi", "country": "India", "start": "2026-12-10", "end": "2026-12-15", "score": 0.52, "tier": "Act", "driver": "earthquake (severity 0.90)"},
+        {"trip_id": "KTM-01", "place": "Kathmandu", "country": "Nepal", "start": "2026-12-16", "end": "2026-12-20", "score": 0.10, "tier": "Green", "driver": "rain (severity 0.10)"},
+    ]
+    rows = _trip_rows_from_sims(sims, "KTM-01")
+    assert len(rows) == 2
+    assert rows[1]["trip_id"].endswith("★")
+    assert "Act" in rows[0]["icon"]
+    assert "Green" in rows[1]["icon"]

@@ -117,6 +117,26 @@ def _resolve_manual_leg(legs, picked_label):
     return None
 
 
+def _trip_rows_from_sims(sims, picked_trip_id):
+    rows = []
+    for s in sims:
+        is_picked = s.get("trip_id") == picked_trip_id
+        rows.append(
+            {
+                "trip_id": f"{s.get('trip_id', '')} ★" if is_picked else s.get("trip_id", ""),
+                "place": s.get("place", ""),
+                "country": s.get("country", ""),
+                "start": s.get("start", ""),
+                "end": s.get("end", ""),
+                "score": s.get("score", 0.0),
+                "icon": f"{ICON.get(s.get('tier', 'Green'), '⚪')} {s.get('tier', 'Green')}",
+                "driver": s.get("driver", ""),
+                "tier": s.get("tier", "Green"),
+            }
+        )
+    return rows
+
+
 def _group_alerts(alert_dicts):
     buckets = [[], [], [], []]
     for a in alert_dicts:
@@ -209,6 +229,8 @@ def main():
         mode = st.radio("Mode", ["● Live", "✎ Manual"], index=0, horizontal=True)
     is_manual = bool(mode and "Manual" in str(mode))
     st.info("**" + _summary_text(scores, alerts) + "**")
+    manual_sims = None
+    manual_picked_id = None
     if is_manual:
         st.caption("Simulation only — what-if; no DB write, no email.")
         st.subheader("Manual — set hazard values")
@@ -247,7 +269,9 @@ def main():
         )
         severity = st.sidebar.slider("Severity", 0.0, 1.0, 0.5, step=0.05)
         distance_km = st.sidebar.slider("Distance (km)", 0, 1000, 50, step=10)
-        event_date = st.sidebar.date_input("Event date")
+        _picked_for_date = _resolve_manual_leg(_opt_legs, picked)
+        _default_date = _picked_for_date.start if _picked_for_date is not None else None
+        event_date = st.sidebar.date_input("Event date", value=_default_date)
         duration_days = st.sidebar.number_input("Duration (days)", min_value=1, max_value=30, value=3)
         watch_threshold = st.sidebar.slider("Watch threshold", 0.05, 0.45, 0.15, step=0.05)
         act_threshold = st.sidebar.slider("Act threshold", 0.15, 0.90, 0.45, step=0.05)
@@ -284,7 +308,7 @@ def main():
             if not legs:
                 legs = _load_legs_fallback("trips.csv")
             picked_leg = _resolve_manual_leg(legs, picked)
-            display_legs = [picked_leg] if picked_leg is not None else []
+            display_legs = list(legs)
             sims = []
             for leg in display_legs:
                 prev_tier = prev_by_leg.get(leg.leg_id, "Green")
@@ -300,8 +324,10 @@ def main():
                     clamped_act,
                     prev_tier,
                 )
-                sim.update({"trip_id": leg.trip_id, "place": leg.place, "country": leg.country, "leg_id": leg.leg_id, "lat": leg.lat, "lon": leg.lon})
+                sim.update({"trip_id": leg.trip_id, "place": leg.place, "country": leg.country, "leg_id": leg.leg_id, "lat": leg.lat, "lon": leg.lon, "start": str(leg.start), "end": str(leg.end)})
                 sims.append(sim)
+            manual_sims = sims
+            manual_picked_id = picked_leg.trip_id if picked_leg is not None else None
             st.subheader("Manual results — grouped by tier × change")
             if sims:
                 sim_df = pd.DataFrame(sims)
@@ -362,7 +388,18 @@ def main():
     st.caption("FIVE COUNTRIES · ONE TEAM — OUR APPROACH")
     st.caption("Every leg your clients will travel — scored and explained, in English.")
     st.subheader("Trip scores")
-    if scores:
+    if is_manual and manual_sims:
+        st.caption(f"Manual simulation — {hazard_type} · ★ Picked: {manual_picked_id or '(none)'} · Live DB untouched.")
+        sim_rows = _trip_rows_from_sims(manual_sims, manual_picked_id)
+        sdf = pd.DataFrame(sim_rows)
+        st.dataframe(sdf[["trip_id", "place", "country", "start", "end", "score", "icon", "driver"]], use_container_width=True)
+        fig = px.bar(sdf, x="trip_id", y="score", color="tier", color_discrete_map=COLORS,
+                     title="Simulated leg risk (Manual — worst leg drives trip)")
+        fig.update_yaxes(range=[0, 1])
+        fig.update_traces(text=sdf["score"].round(2), textposition="outside")
+        fig.update_layout(template="simple_white", font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
+        st.plotly_chart(fig, use_container_width=True)
+    elif scores:
         df = pd.DataFrame(scores)
         df["icon"] = df["tier"].map(lambda t: f"{ICON.get(t, '⚪')} {t}")
         st.dataframe(df[["trip_id", "place", "country", "start", "end", "score", "icon", "driver"]], use_container_width=True)
@@ -378,7 +415,17 @@ def main():
     st.caption("FIVE COUNTRIES · ONE TEAM")
     st.caption("Read the legs your clients will travel — scored and explained.")
     st.subheader("Map")
-    if scores:
+    if is_manual and manual_sims:
+        mdf = pd.DataFrame([s for s in manual_sims if s.get("lat") is not None])
+        if not mdf.empty:
+            fig2 = px.scatter_map(mdf, lat="lat", lon="lon", color="tier", color_discrete_map=COLORS,
+                                      hover_name="place", hover_data=["trip_id", "score", "country"],
+                                      center=dict(lat=23.5, lon=78.5), zoom=4, height=420, map_style="carto-positron")
+            fig2.update_layout(margin=dict(t=10, b=10, l=10, r=10), template="simple_white",
+                               font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
+            fig2.update_layout(title=dict(text="Manual simulated map — ★ picked highlighted in table", font=dict(family="Source Sans 3, system-ui, sans-serif", size=13)))
+            st.plotly_chart(fig2, use_container_width=True)
+    elif scores:
         mdf = pd.DataFrame([s for s in scores if s["lat"] is not None])
         if not mdf.empty:
             fig2 = px.scatter_map(mdf, lat="lat", lon="lon", color="tier", color_discrete_map=COLORS,
