@@ -18,6 +18,11 @@ def test_threshold_clamp_prevents_inversion():
                         watch=0.40, act=0.20, prev_tier="Green")
     assert r["tier"] in ("Green", "Watch", "Act")
     assert r["score"] >= 0.0
+    # concrete clamp proof: score ~0.30 must stay Green (act was raised above 0.40)
+    r2 = simulate_manual(_leg(), "cyclone", 0.33, 0, date(2026, 8, 10), 3, 0.9,
+                         watch=0.40, act=0.20, prev_tier="Green")
+    assert 0.25 < r2["score"] < 0.35
+    assert r2["tier"] == "Green"
 
 def test_manual_escalation_green_to_act():
     r = simulate_manual(_leg(), "cyclone", 0.9, 0, date(2026, 8, 10), 3, 0.9,
@@ -59,6 +64,21 @@ def test_no_db_write_in_manual_path():
     assert "simulate_manual" in text
     assert text.count("log_alert") == 0 or "Manual" in text.split("log_alert")[0][-2000:]
 
+def test_simulate_manual_never_writes(monkeypatch):
+    import db
+    import alerts as alerts_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("manual simulation must not write")
+
+    monkeypatch.setattr(db, "upsert_event", _boom)
+    monkeypatch.setattr(db, "log_alert", _boom)
+    monkeypatch.setattr(db, "update_score", _boom)
+    monkeypatch.setattr(alerts_mod, "send_email", _boom)
+    r = simulate_manual(_leg(), "cyclone", 0.9, 0, date(2026, 8, 10), 3, 0.9,
+                        watch=0.15, act=0.45, prev_tier="Green")
+    assert r["tier"] == "Act"
+
 from dashboard import _group_alerts, _load_legs_fallback
 
 def test_grouping_order_tier_times_change():
@@ -76,3 +96,23 @@ def test_fallback_legs_parse_without_monitor():
     legs = _load_legs_fallback("trips.csv")
     assert len(legs) >= 1
     assert hasattr(legs[0], "trip_id")
+    assert "import monitor" not in pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+
+from dashboard import _manual_leg_options, _resolve_manual_leg
+
+def test_manual_options_from_legs():
+    legs = [_leg(), Leg(leg_id="KTM-01", trip_id="KTM-01", place="Kathmandu", country="Nepal",
+                        lat=27.71, lon=85.32, start=date(2026, 12, 16), end=date(2026, 12, 20))]
+    opts = _manual_leg_options(legs)
+    assert len(opts) == 2
+    assert opts[0].startswith("PARO-01")
+    assert "Kathmandu" in opts[1]
+
+def test_resolve_manual_leg_filters():
+    legs = [_leg(), Leg(leg_id="KTM-01", trip_id="KTM-01", place="Kathmandu", country="Nepal",
+                        lat=27.71, lon=85.32, start=date(2026, 12, 16), end=date(2026, 12, 20))]
+    picked = _manual_leg_options(legs)[1]
+    chosen = _resolve_manual_leg(legs, picked)
+    assert chosen is not None
+    assert chosen.trip_id == "KTM-01"
+    assert _resolve_manual_leg(legs, "(no legs — run monitor once)") is None

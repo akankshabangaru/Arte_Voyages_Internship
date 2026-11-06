@@ -102,6 +102,20 @@ def _summary_text(scores, alerts):
     return f"{legs} legs scored · {act} need review (Act) · {watch} on watch"
 
 
+def _manual_leg_options(legs):
+    return [f"{leg.trip_id} · {leg.place}, {leg.country}" for leg in legs]
+
+
+def _resolve_manual_leg(legs, picked_label):
+    if not picked_label or picked_label.startswith("(no legs"):
+        return None
+    trip_id = str(picked_label).split("·")[0].strip()
+    for leg in legs:
+        if leg.trip_id == trip_id or leg.leg_id == trip_id:
+            return leg
+    return None
+
+
 def _group_alerts(alert_dicts):
     buckets = [[], [], [], []]
     for a in alert_dicts:
@@ -197,7 +211,33 @@ def main():
         st.caption("Simulation only — what-if; no DB write, no email.")
         st.subheader("Manual — set hazard values")
         st.caption("Pick a leg, set a hazard, drag the thresholds — the card below recalculates instantly.")
-        trip_options = [f"{s['trip_id']} · {s['place']}, {s['country']}" for s in scores] or ["(no legs — run monitor once)"]
+        # Build legs first (read-only from scores, fallback to CSV) so Pick-trip lists the same legs that are simulated
+        _opt_legs = []
+        try:
+            from datetime import date as _d_opt
+            from scorer import Leg as _Leg_opt
+
+            for _s in scores:
+                try:
+                    _opt_legs.append(
+                        _Leg_opt(
+                            leg_id=_s["leg_id"],
+                            trip_id=_s["trip_id"],
+                            place=_s["place"],
+                            country=_s["country"],
+                            lat=float(_s["lat"]),
+                            lon=float(_s["lon"]),
+                            start=_d_opt.fromisoformat(str(_s["start"])),
+                            end=_d_opt.fromisoformat(str(_s["end"])),
+                        )
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            _opt_legs = []
+        if not _opt_legs:
+            _opt_legs = _load_legs_fallback("trips.csv")
+        trip_options = _manual_leg_options(_opt_legs) or ["(no legs — run monitor once)"]
         picked = st.sidebar.selectbox("Pick trip", trip_options)
         hazard_type = st.sidebar.selectbox(
             "Hazard type",
@@ -241,8 +281,10 @@ def main():
                     continue
             if not legs:
                 legs = _load_legs_fallback("trips.csv")
+            picked_leg = _resolve_manual_leg(legs, picked)
+            display_legs = [picked_leg] if picked_leg is not None else []
             sims = []
-            for leg in legs:
+            for leg in display_legs:
                 prev_tier = prev_by_leg.get(leg.leg_id, "Green")
                 sim = simulate_manual(
                     leg,
