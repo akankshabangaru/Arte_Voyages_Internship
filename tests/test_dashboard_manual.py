@@ -116,3 +116,10 @@ def test_resolve_manual_leg_filters():
     assert chosen is not None
     assert chosen.trip_id == "KTM-01"
     assert _resolve_manual_leg(legs, "(no legs — run monitor once)") is None
+
+def test_maps_are_english_and_india_centred():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert 'map_style="carto-positron"' in text
+    assert "open-street-map" not in text
+    assert "center=dict(lat=23.5" in text
+    assert "zoom=4" in text

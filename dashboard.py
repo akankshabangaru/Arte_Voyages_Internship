@@ -313,9 +313,10 @@ def main():
                             color_discrete_map=COLORS,
                             hover_name="place",
                             hover_data=["trip_id", "score", "country"],
-                            zoom=3,
+                            center=dict(lat=23.5, lon=78.5),
+                            zoom=4,
                             height=360,
-                            map_style="open-street-map",
+                            map_style="carto-positron",
                         )
                         fig_manual.update_layout(margin=dict(t=10, b=10, l=10, r=10), template="simple_white", font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
                         st.plotly_chart(fig_manual, use_container_width=True)
@@ -376,7 +377,7 @@ def main():
         if not mdf.empty:
             fig2 = px.scatter_map(mdf, lat="lat", lon="lon", color="tier", color_discrete_map=COLORS,
                                       hover_name="place", hover_data=["trip_id", "score", "country"],
-                                      zoom=3, height=420, map_style="open-street-map")
+                                      center=dict(lat=23.5, lon=78.5), zoom=4, height=420, map_style="carto-positron")
             fig2.update_layout(margin=dict(t=10, b=10, l=10, r=10), template="simple_white",
                                font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
             st.plotly_chart(fig2, use_container_width=True)
