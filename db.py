@@ -7,12 +7,13 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY, type TEXT NOT NULL, country TEXT, lat REAL, lon REAL,
         event_date TEXT NOT NULL, severity REAL NOT NULL, title TEXT NOT NULL,
-        source_url TEXT, first_seen TEXT NOT NULL
+        source_url TEXT, first_seen TEXT NOT NULL,
+        duration_days INTEGER DEFAULT 3, confidence REAL DEFAULT 0.8, issued TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS trip_scores (
         trip_id TEXT NOT NULL, leg_id TEXT NOT NULL, place TEXT, country TEXT,
         lat REAL, lon REAL, start_date TEXT, end_date TEXT, score REAL, tier TEXT,
-        driver TEXT, updated_at TEXT, PRIMARY KEY (trip_id, leg_id)
+        driver TEXT, updated_at TEXT, tier_since TEXT, PRIMARY KEY (trip_id, leg_id)
     )""",
     """CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT, trip_id TEXT, leg_id TEXT,
@@ -78,6 +79,15 @@ def init_db():
                     asyncio.run(con.execute(stmt))
                 except RuntimeError:
                     pass
+        # Migrations for DBs created before round-trip columns (idempotent)
+        for ddl in ("ALTER TABLE events ADD COLUMN duration_days INTEGER DEFAULT 3",
+                    "ALTER TABLE events ADD COLUMN confidence REAL DEFAULT 0.8",
+                    "ALTER TABLE events ADD COLUMN issued TEXT",
+                    "ALTER TABLE trip_scores ADD COLUMN tier_since TEXT"):
+            try:
+                con.execute(ddl)
+            except Exception:
+                pass
         try:
             con.commit()
         except AttributeError:
@@ -93,10 +103,11 @@ def upsert_event(ev, first_seen: datetime):
     con = _connect()
     try:
         con.execute(
-            "INSERT INTO events (id,type,country,lat,lon,event_date,severity,title,source_url,first_seen) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET severity=excluded.severity, title=excluded.title",
-            (ev.event_id, ev.type, ev.country, ev.lat, ev.lon, str(ev.date), ev.severity, ev.title, ev.url, first_seen.isoformat()),
+            "INSERT INTO events (id,type,country,lat,lon,event_date,severity,title,source_url,first_seen,duration_days,confidence,issued) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET severity=excluded.severity, title=excluded.title, duration_days=excluded.duration_days, confidence=excluded.confidence, issued=excluded.issued",
+            (ev.event_id, ev.type, ev.country, ev.lat, ev.lon, str(ev.date), ev.severity, ev.title, ev.url, first_seen.isoformat(),
+             getattr(ev, "duration_days", 3), getattr(ev, "confidence", 0.8), str(ev.issued) if getattr(ev, "issued", None) else str(ev.date)),
         )
         con.commit()
     finally:
@@ -107,33 +118,56 @@ def get_events():
     from scorer import Event
     con = _connect()
     try:
-        cur = con.execute("SELECT id,type,country,lat,lon,event_date,severity,title,source_url FROM events")
+        try:
+            cur = con.execute("SELECT id,type,country,lat,lon,event_date,severity,title,source_url,duration_days,confidence,issued FROM events")
+        except Exception:
+            cur = con.execute("SELECT id,type,country,lat,lon,event_date,severity,title,source_url FROM events")
         rows = cur.fetchall()
         out = []
         for r in rows:
             _id, typ, country, lat, lon, dstr, sev, title, url = r[:9]
+            dur = r[9] if len(r) > 9 else 3
+            conf = r[10] if len(r) > 10 else 0.8
+            issued = r[11] if len(r) > 11 else None
             try:
                 d = date.fromisoformat(dstr)
-            except ValueError:
+                iss = date.fromisoformat(issued) if issued else d
+            except (ValueError, TypeError):
                 continue
-            out.append(Event(event_id=_id, date=d, issued=d, country=country or "", type=typ,
+            out.append(Event(event_id=_id, date=d, issued=iss, country=country or "", type=typ,
                              severity=float(sev), lat=float(lat or 0), lon=float(lon or 0),
-                             duration_days=3, confidence=0.8, title=title or "", url=url or "", source="store"))
+                             duration_days=int(dur or 3), confidence=float(conf or 0.8), title=title or "", url=url or "", source="store"))
         return out
     finally:
         _close(con)
 
 
-def update_score(trip_id, leg_id, place, country, lat, lon, start, end, score, tier, driver, updated_at):
+def update_score(trip_id, leg_id, place, country, lat, lon, start, end, score, tier, driver, updated_at, tier_since=None):
     con = _connect()
     try:
+        ts = tier_since.isoformat() if hasattr(tier_since, "isoformat") else (str(tier_since) if tier_since else None)
         con.execute(
-            "INSERT INTO trip_scores (trip_id,leg_id,place,country,lat,lon,start_date,end_date,score,tier,driver,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(trip_id,leg_id) DO UPDATE SET score=excluded.score, tier=excluded.tier, driver=excluded.driver, updated_at=excluded.updated_at",
-            (trip_id, leg_id, place, country, lat, lon, str(start), str(end), float(score), tier, driver or "", updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at)),
+            "INSERT INTO trip_scores (trip_id,leg_id,place,country,lat,lon,start_date,end_date,score,tier,driver,updated_at,tier_since) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(trip_id,leg_id) DO UPDATE SET score=excluded.score, tier=excluded.tier, driver=excluded.driver, updated_at=excluded.updated_at, tier_since=excluded.tier_since",
+            (trip_id, leg_id, place, country, lat, lon, str(start), str(end), float(score), tier, driver or "", updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at), ts),
         )
         con.commit()
+    finally:
+        _close(con)
+
+
+def get_score_row(leg_id: str):
+    con = _connect()
+    try:
+        try:
+            cur = con.execute("SELECT tier,tier_since FROM trip_scores WHERE leg_id=?", (leg_id,))
+        except Exception:
+            cur = con.execute("SELECT tier, NULL FROM trip_scores WHERE leg_id=?", (leg_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {"tier": row[0], "tier_since": row[1]}
     finally:
         _close(con)
 
@@ -165,7 +199,7 @@ def upsert_health(feed: str, ok: bool, error: str = ""):
         now = datetime.now().isoformat()
         con.execute(
             "INSERT INTO feed_health (feed,last_ok,last_error,updated_at) VALUES (?,?,?,?) "
-            "ON CONFLICT(feed) DO UPDATE SET last_ok=excluded.last_ok, last_error=excluded.last_error, updated_at=excluded.updated_at",
+            "ON CONFLICT(feed) DO UPDATE SET last_ok=CASE WHEN excluded.last_ok IS NOT NULL THEN excluded.last_ok ELSE feed_health.last_ok END, last_error=excluded.last_error, updated_at=excluded.updated_at",
             (feed, now if ok else None, error or "", now),
         )
         con.commit()

@@ -60,15 +60,23 @@ def fetch_all(now: datetime, legs: list[Leg]) -> list:
     return out
 
 
-def _tier_with_cooldown(leg_id: str, raw: str, now: datetime) -> str:
-    st = _LAST.setdefault(leg_id, {"tier": "Green", "since": None})
-    if _TIER_RANK[raw] >= _TIER_RANK[st["tier"]]:
-        st["tier"], st["since"] = raw, None
-    else:
-        st["since"] = st["since"] or now
-        if now - st["since"] >= COOLDOWN:
-            st["tier"], st["since"] = raw, None
-    return st["tier"]
+def _tier_with_cooldown(prev_tier: str, prev_since, raw: str, now: datetime) -> tuple[str, datetime | None]:
+    """DB-backed cooldown: rises immediately, falls only after 48h below."""
+    if _TIER_RANK[raw] >= _TIER_RANK[prev_tier]:
+        return raw, None
+    since = prev_since
+    if since is None:
+        since = now
+    # Normalize naive/aware mix (all times UTC)
+    try:
+        elapsed = now - since
+    except TypeError:
+        now_r = now.replace(tzinfo=None) if hasattr(now, "replace") else now
+        since_r = since.replace(tzinfo=None) if hasattr(since, "replace") else since
+        elapsed = now_r - since_r
+    if elapsed >= COOLDOWN:
+        return raw, None
+    return prev_tier, since
 
 
 def poll_once(now: datetime, feeds: dict = None, notifier=None, legs: list[Leg] = None) -> list[dict]:
@@ -82,56 +90,63 @@ def poll_once(now: datetime, feeds: dict = None, notifier=None, legs: list[Leg] 
     today = now.date()
     alerts_out: list[dict] = []
     for leg in legs:
+        prev_row = db.get_score_row(leg.leg_id) or {"tier": "Green", "tier_since": None}
+        prev_tier = prev_row.get("tier") or "Green"
+        prev_since_raw = prev_row.get("tier_since")
+        prev_since = None
+        if prev_since_raw:
+            try:
+                prev_since = datetime.fromisoformat(prev_since_raw)
+            except ValueError:
+                prev_since = None
         if leg.end < today:
+            if prev_tier != "Green":
+                text = render_alert(leg.trip_id, leg, "Green", prev_tier, 0.0, [], now)
+                a = {"trip_id": leg.trip_id, "leg_id": leg.leg_id, "kind": "CLOSED", "tier": "Green",
+                     "prev_tier": prev_tier, "text": text, "created_at": now.isoformat()}
+                db.log_alert(a)  # propagate: DB outage must go red in Actions
+                fn = notifier or notify
+                try:
+                    fn(a)
+                except Exception as e:
+                    print(f"WARN: notify failed (alert persisted): {e}")
+                    db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
+                                    leg.start, leg.end, 0.0, prev_tier, "", now, tier_since=prev_since)
+                else:
+                    db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
+                                    leg.start, leg.end, 0.0, "Green", "", now, tier_since=None)
+                alerts_out.append(a)
+                _LAST[leg.leg_id] = {"tier": "Green", "since": None}
             continue
-        # Only remaining days can still be affected for display, but score full leg (simpler, matches spec intent for MVP)
         sigs = leg_signals(leg, stored, today)
         score = leg_score_from_signals(sigs)
         raw = tier_of(score)
-        tier = _tier_with_cooldown(leg.leg_id, raw, now)
-        prev = _LAST.get(f"__prev_{leg.leg_id}", {}).get("tier", "Green") if False else _last_tier_db(leg)
-        # Determine kind: escalation / de-escalation based on stored previous tier
+        tier, tier_since = _tier_with_cooldown(prev_tier, prev_since, raw, now)
         top = max(sigs, key=lambda s: s["risk"]) if sigs else None
         driver = top["title"][:80] if top else ""
-        db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
-                        leg.start, leg.end, score, tier, driver, now)
-        prev_tier = _prev_tier(leg)
         if tier != prev_tier:
             kind = "ESCALATED" if _TIER_RANK[tier] > _TIER_RANK[prev_tier] else "DE-ESCALATED"
             text = render_alert(leg.trip_id, leg, tier, prev_tier, score, sigs, now)
             a = {"trip_id": leg.trip_id, "leg_id": leg.leg_id, "kind": kind, "tier": tier,
                  "prev_tier": prev_tier, "text": text, "created_at": now.isoformat()}
-            try:
-                db.log_alert(a)
-            except Exception as e:
-                print(f"WARN: log_alert failed: {e}")
+            db.log_alert(a)  # propagate: DB outage must go red in Actions
             fn = notifier or notify
             try:
                 fn(a)
             except Exception as e:
-                print(f"WARN: notify failed (alert persisted): {e}")
+                print(f"WARN: notify failed (alert persisted, will retry): {e}")
+                # Do NOT advance tier, so next tick retries delivery
+                db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
+                                leg.start, leg.end, score, prev_tier, driver, now, tier_since=prev_since)
+            else:
+                db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
+                                leg.start, leg.end, score, tier, driver, now, tier_since=tier_since)
             alerts_out.append(a)
-        _store_prev_tier(leg, tier)
+        else:
+            db.update_score(leg.trip_id, leg.leg_id, leg.place, leg.country, leg.lat, leg.lon,
+                            leg.start, leg.end, score, tier, driver, now, tier_since=tier_since)
+        _LAST[leg.leg_id] = {"tier": tier, "since": tier_since}
     return alerts_out
-
-
-# Prev-tier persistence via trip_scores table (cooldown stays in-process for MVP)
-def _last_tier_db(leg):
-    try:
-        for row in db.get_scores():
-            if row["leg_id"] == leg.leg_id:
-                return row["tier"]
-    except Exception:
-        pass
-    return "Green"
-
-
-def _prev_tier(leg):
-    return _LAST.get(f"__prev__{leg.leg_id}", {}).get("tier", "Green")
-
-
-def _store_prev_tier(leg, tier):
-    _LAST[f"__prev__{leg.leg_id}"] = {"tier": tier}
 
 
 def main():

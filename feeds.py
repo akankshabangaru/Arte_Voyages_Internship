@@ -53,14 +53,15 @@ def parse_usgs(data: dict, min_mag: float = 5.0) -> list[Event]:
     for f in features:
         try:
             p, (lon, lat, *_rest) = f["properties"], f["geometry"]["coordinates"]
-        except (KeyError, TypeError, ValueError):
+            mag = p.get("mag")
+            if mag is None or mag < min_mag:
+                continue
+            day = datetime.fromtimestamp(p["time"] / 1000, tz=timezone.utc).date()
+            country = in_scope(lat, lon)
+            if country is None:
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
             continue
-        if p.get("mag") is None or p["mag"] < min_mag:
-            continue
-        country = in_scope(lat, lon)
-        if country is None:
-            continue
-        day = datetime.fromtimestamp(p["time"] / 1000, tz=timezone.utc).date()
         out.append(Event(event_id=f"usgs-{f['id']}", date=day, issued=day, country=country, type="earthquake",
                          severity=min(1.0, (p["mag"] - 4.5) / 4), lat=lat, lon=lon,
                          duration_days=MIN_DURATION["earthquake"], confidence=0.9,
@@ -125,6 +126,10 @@ def parse_openmeteo(data: dict, lat: float, lon: float, place: str, today: date)
     except (KeyError, TypeError):
         return []
     for i, day in enumerate(times):
+        try:
+            day_date = date.fromisoformat(day)
+        except (ValueError, TypeError):
+            continue
         for kind, key, unit, steps in rules:
             try:
                 val = d[key][i]
@@ -132,7 +137,7 @@ def parse_openmeteo(data: dict, lat: float, lon: float, place: str, today: date)
                 continue
             sev = next((s for thr, s in steps if val is not None and val >= thr), None)
             if sev:
-                out.append(Event(event_id=f"wx-{place}-{kind}-{day}", date=date.fromisoformat(day), issued=today,
+                out.append(Event(event_id=f"wx-{place}-{kind}-{day}", date=day_date, issued=today,
                                  country=country, type=kind, severity=sev, lat=lat, lon=lon, duration_days=1,
                                  confidence=0.6, title=f"Forecast {kind} at {place}: {val} {unit} on {day}",
                                  url="https://open-meteo.com", source="open-meteo"))
@@ -148,6 +153,55 @@ def _news_severity(title: str) -> float:
     return 0.35
 
 
+_GEO_CACHE = None
+
+
+def _load_geo() -> list[tuple[str, float, float, str]]:
+    global _GEO_CACHE
+    if _GEO_CACHE is not None:
+        return _GEO_CACHE
+    country_code = {"IN": "India", "NP": "Nepal", "BT": "Bhutan", "LK": "Sri Lanka", "MV": "Maldives"}
+    out = []
+    try:
+        with open("data/cities15000.txt", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 9:
+                    continue
+                cc = parts[8].strip()
+                if cc not in country_code:
+                    continue
+                name = parts[1].strip()
+                try:
+                    lat = float(parts[4]); lon = float(parts[5])
+                except (ValueError, IndexError):
+                    continue
+                if name:
+                    out.append((name.lower(), lat, lon, country_code[cc]))
+    except FileNotFoundError:
+        pass
+    _GEO_CACHE = out
+    return out
+
+
+def geocode_title(title: str) -> tuple[float, float, str] | None:
+    t = title.lower()
+    for name, lat, lon, country in _load_geo():
+        if name and len(name) >= 4 and name in t:
+            return lat, lon, country
+    # Typo-tolerant fallback on individual words (rapidfuzz if available)
+    try:
+        from rapidfuzz import fuzz
+        words = [w.strip(".,;:!?()\"'") for w in t.split() if len(w) >= 5]
+        for name, lat, lon, country in _load_geo():
+            for w in words:
+                if fuzz.ratio(w, name) >= 88:
+                    return lat, lon, country
+    except ImportError:
+        pass
+    return None
+
+
 def parse_gdelt(data: dict) -> list[Event]:
     out = []
     try:
@@ -159,17 +213,21 @@ def parse_gdelt(data: dict) -> list[Event]:
         url = a.get("url") or ""
         if not title:
             continue
-        # GDELT DOC ArtList has no lat/lon; use url country hints or skip geo-less headlines
-        # (city matching via GeoNames is deferred to avoid noisy geo guesses).
+        # GDELT DOC ArtList has no lat/lon; fall back to GeoNames city match on title
         lat = a.get("lat") or a.get("latitude")
         lon = a.get("lon") or a.get("longitude")
         if lat is None or lon is None:
-            continue
+            hit = geocode_title(title)
+            if hit is None:
+                continue
+            lat, lon = hit[0], hit[1]
         try:
             lat, lon = float(lat), float(lon)
         except (ValueError, TypeError):
             continue
         country = in_scope(lat, lon)
+        if country is None:
+            country = geocode_title(title)[2] if geocode_title(title) else None
         if country is None:
             continue
         try:
@@ -200,12 +258,15 @@ def parse_reliefweb(data: dict) -> list[Event]:
         lat = fields.get("lat")
         lon = fields.get("lon")
         if lat is None or lon is None:
-            continue
+            hit = geocode_title(title)
+            if hit is None:
+                continue
+            lat, lon = hit[0], hit[1]
         try:
             lat, lon = float(lat), float(lon)
         except (ValueError, TypeError):
             continue
-        country = in_scope(lat, lon)
+        country = in_scope(lat, lon) or (geocode_title(title)[2] if geocode_title(title) else None)
         if country is None:
             continue
         try:
@@ -269,8 +330,12 @@ def weather_feed(trips):
     def fetch(now) -> list[Event]:
         out = []
         for lat, lon, place in locs:
-            r = _get(METEO_URL, params={"latitude": lat, "longitude": lon, "forecast_days": 14, "timezone": "auto",
-                                        "daily": "precipitation_sum,wind_gusts_10m_max,temperature_2m_max"}).json()
+            try:
+                r = _get(METEO_URL, params={"latitude": lat, "longitude": lon, "forecast_days": 14, "timezone": "auto",
+                                            "daily": "precipitation_sum,wind_gusts_10m_max,temperature_2m_max"}).json()
+            except Exception as e:
+                print(f"WARN: weather fetch failed for {place}: {e}")
+                continue
             out += parse_openmeteo(r, lat, lon, place, now.date())
         return out
 

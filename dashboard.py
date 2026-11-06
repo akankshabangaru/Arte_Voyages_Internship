@@ -67,8 +67,40 @@ def main():
             fig2.update_layout(mapbox_style="open-street-map", margin=dict(t=10, b=10, l=10, r=10))
             st.plotly_chart(fig2, use_container_width=True)
 
-    st.subheader("14-day outlook note")
-    st.caption("Outlook is the Open-Meteo forecast window rendered per leg-day in monitor scoring; per-day chart follows once forecast events are stored (Phase 2 polish).")
+    st.subheader("14-day outlook")
+    try:
+        if db is not None and scores:
+            from datetime import date as _date, timedelta as _td
+            from scorer import Leg as _Leg, Event as _Event, leg_score_from_signals, leg_signals
+            events = db.get_events()
+            today = _date.today()
+            rows = []
+            for s in scores:
+                try:
+                    st_date = _date.fromisoformat(s["start"])
+                    en_date = _date.fromisoformat(s["end"])
+                except Exception:
+                    continue
+                for i in range(14):
+                    d = today + _td(days=i)
+                    if st_date <= d <= en_date:
+                        leg = _Leg(leg_id=s["leg_id"], trip_id=s["trip_id"], place=s["place"],
+                                   country=s["country"], lat=s["lat"], lon=s["lon"], start=d, end=d)
+                        # Score against events known by today (forecasts included)
+                        sigs = leg_signals(leg, events, today)
+                        rows.append({"leg": f"{s['trip_id']} {s['place']}", "day": d, "risk": leg_score_from_signals(sigs)})
+            if rows:
+                odf = pd.DataFrame(rows)
+                fig3 = px.line(odf, x="day", y="risk", color="leg", title="14-day outlook risk per leg-day")
+                fig3.add_hline(y=0.15, line_dash="dash")
+                fig3.add_hline(y=0.45, line_dash="dash")
+                st.plotly_chart(fig3, use_container_width=True)
+            else:
+                st.caption("Outlook: no leg days in next 14 days.")
+        else:
+            st.caption("Outlook: run monitor once.")
+    except Exception as e:
+        st.caption(f"Outlook unavailable: {e}")
 
     st.subheader("Alert feed")
     tier_filter = st.selectbox("Filter by tier", ["All", "Green", "Watch", "Act"])
