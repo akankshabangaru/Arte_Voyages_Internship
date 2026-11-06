@@ -231,6 +231,7 @@ def main():
     st.info("**" + _summary_text(scores, alerts) + "**")
     manual_sims = None
     manual_picked_id = None
+    manual_thresholds = None
     if is_manual:
         st.caption("Simulation only — what-if; no DB write, no email.")
         st.subheader("Manual — set hazard values")
@@ -328,6 +329,7 @@ def main():
                 sims.append(sim)
             manual_sims = sims
             manual_picked_id = picked_leg.trip_id if picked_leg is not None else None
+            manual_thresholds = {"watch": watch_threshold, "act": clamped_act}
             st.subheader("Manual results — grouped by tier × change")
             if sims:
                 sim_df = pd.DataFrame(sims)
@@ -479,15 +481,31 @@ def main():
     st.subheader("Alert feed")
     tier_filter = st.selectbox("Filter by tier", ["All", "Green", "Watch", "Act"])
     kind_filter = st.selectbox("Filter by kind", ["All", "ESCALATED", "DE-ESCALATED", "CLOSED"])
-    shown = alerts
-    if tier_filter != "All":
-        shown = [a for a in shown if a.get("tier") == tier_filter]
-    if kind_filter != "All":
-        shown = [a for a in shown if a.get("kind") == kind_filter]
-    for a in shown[:50]:
-        tier = a.get('tier', '')
-        st.markdown(f"**{a.get('created_at','')[:16]}** · {a.get('kind','')} · {a.get('prev_tier','')} → **{ICON.get(tier, '⚪')} {tier}**")
-        st.code(a.get("text", ""))
+    if is_manual and manual_sims:
+        st.caption("Manual simulation — showing simulated alerts (Live DB untouched).")
+        _sims = manual_sims
+        if tier_filter != "All":
+            _sims = [s for s in _sims if s.get("tier") == tier_filter]
+        if kind_filter != "All":
+            _sims = [s for s in _sims if s.get("kind") == kind_filter]
+        if _sims:
+            for _sim in _sims[:50]:
+                _render_manual_result(_sim, manual_thresholds or {"watch": 0.15, "act": 0.45})
+        else:
+            st.info("No simulated alerts match those filters — try All / All or move a slider.")
+    else:
+        shown = alerts
+        if tier_filter != "All":
+            shown = [a for a in shown if a.get("tier") == tier_filter]
+        if kind_filter != "All":
+            shown = [a for a in shown if a.get("kind") == kind_filter]
+        if shown:
+            for a in shown[:50]:
+                tier = a.get('tier', '')
+                st.markdown(f"**{a.get('created_at','')[:16]}** · {a.get('kind','')} · {a.get('prev_tier','')} → **{ICON.get(tier, '⚪')} {tier}**")
+                st.code(a.get("text", ""))
+        else:
+            st.info("No alerts yet — Live shows only tier changes from monitor. Switch to ✎ Manual and set Event date inside a leg to see simulated alerts above.")
 
     st.caption("DISCRETION & BRAND ALIGNMENT")
     st.caption("End-to-end management, with 24/7 quiet care.")

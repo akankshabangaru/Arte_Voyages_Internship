@@ -146,6 +146,15 @@ def test_serif_font_uses_important():
     assert 'font-family: "Playfair Display", Georgia, serif !important' in text
     assert '@import url(' in text
 
+def test_alert_feed_has_empty_state():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert "No alerts yet" in text
+
+def test_alert_feed_manual_shows_sims():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert "showing simulated alerts" in text
+    assert "_render_manual_result" in text
+
 from dashboard import _trip_rows_from_sims
 
 def test_trip_rows_from_sims_highlights_picked():
