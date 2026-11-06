@@ -39,6 +39,7 @@ def _apply_design_system() -> None:
     st.markdown(
         f"""
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@400;600;700&display=swap');
         :root {{
             --color-primary: {t['primary']};
             --color-secondary: {t['secondary']};
@@ -50,10 +51,10 @@ def _apply_design_system() -> None:
             --radius: 10px;
             --spacing: 12px;
         }}
-        .stApp {{ background-color: var(--color-background); color: var(--color-text); }}
+        .stApp {{ background-color: var(--color-background); color: var(--color-text); }} header[data-testid="stHeader"], [data-testid="stDecoration"] {{ background-color: var(--color-background) !important; }}
         .block-container {{ padding-top: 1.5rem; max-width: 1280px; }}
         h1 {{ font-family: "Playfair Display", Georgia, serif; font-weight: 700; color: var(--color-text); letter-spacing: -0.01em; }}
-        h1::after, h2::after {{ content: "✦"; display: block; width: 56px; height: 3px; background: var(--color-secondary); border-radius: 2px; margin-top: 8px; min-height: 3px; }}
+        h1::after, h2::after {{ content: ""; display: block; width: 56px; height: 3px; background: var(--color-secondary); border-radius: 2px; margin-top: 8px; }}
         h2, h3 {{ font-family: "Source Sans 3", system-ui, -apple-system, sans-serif; font-weight: 600; color: var(--color-text); }}
         .stCaption {{ color: var(--color-muted); }}
         [data-testid="stMetric"] {{

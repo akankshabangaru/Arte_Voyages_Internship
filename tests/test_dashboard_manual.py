@@ -132,3 +132,11 @@ def test_luxury_rhythm_present():
     assert "OUR APPROACH" in text
     assert '"#1F3A4D"' in text and '"#A68A56"' in text and '"#FAF8F4"' in text
     assert "1.5rem" in text
+
+def test_ornament_is_brass_line_not_glyph():
+    text = pathlib.Path("dashboard.py").read_text(encoding="utf-8")
+    assert 'content: "";' in text or "content: '';" in text
+    assert 'content: "✦"' not in text
+    assert "content: '✦'" not in text
+    assert "@import url('https://fonts.googleapis.com/css2?family=Playfair+Display" in text
+    assert "family=Source+Sans+3" in text
