@@ -436,6 +436,10 @@ def main():
             fig2.update_layout(margin=dict(t=10, b=10, l=10, r=10), template="simple_white",
                                font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
             st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("No scores yet — run `python -m monitor` once.")
+    else:
+        st.info("No scores yet — run `python -m monitor` once.")
 
     st.caption("OUR APPROACH")
     st.caption("Your clients and your brand — monitored before they travel.")
