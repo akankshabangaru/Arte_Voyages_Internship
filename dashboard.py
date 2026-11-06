@@ -51,14 +51,14 @@ def _apply_design_system() -> None:
             --spacing: 12px;
         }}
         .stApp {{ background-color: var(--color-background); color: var(--color-text); }}
-        .block-container {{ padding-top: 1.2rem; max-width: 1280px; }}
+        .block-container {{ padding-top: 1.5rem; max-width: 1280px; }}
         h1 {{ font-family: "Playfair Display", Georgia, serif; font-weight: 700; color: var(--color-text); letter-spacing: -0.01em; }}
-        h1::after {{ content: ""; display: block; width: 56px; height: 3px; background: var(--color-secondary); border-radius: 2px; margin-top: 8px; }}
+        h1::after, h2::after {{ content: "✦"; display: block; width: 56px; height: 3px; background: var(--color-secondary); border-radius: 2px; margin-top: 8px; min-height: 3px; }}
         h2, h3 {{ font-family: "Source Sans 3", system-ui, -apple-system, sans-serif; font-weight: 600; color: var(--color-text); }}
         .stCaption {{ color: var(--color-muted); }}
         [data-testid="stMetric"] {{
             background: var(--color-surface); border: 1px solid var(--color-border);
-            border-radius: var(--radius); padding: 10px 14px;
+            border-radius: var(--radius); padding: 14px;
         }}
         [data-testid="stMetric"] [data-testid="stMetricLabel"] {{ color: var(--color-muted); font-size: 0.85rem; }}
         [data-testid="stMetric"] [data-testid="stMetricValue"] {{ color: var(--color-text); font-variant-numeric: tabular-nums; }}
@@ -196,6 +196,7 @@ def main():
     st.set_page_config(page_title="Trip Risk Monitor", layout="wide")
     _apply_design_system()
     st.title("Continuous Trip Risk Monitoring")
+    st.caption("Arte Voyages · Curated Luxury Journeys Across India & Beyond ✦")
     st.caption("Follows India, Nepal, Bhutan, Sri Lanka, Maldives — severities from free feeds, alerts by Gmail.")
 
     scores, alerts, health = _load()
@@ -357,6 +358,8 @@ def main():
     with c3:
         st.metric("Alerts (100)", len(alerts))
 
+    st.caption("FIVE COUNTRIES · ONE TEAM — OUR APPROACH")
+    st.caption("Every leg your clients will travel — scored and explained, in English.")
     st.subheader("Trip scores")
     if scores:
         df = pd.DataFrame(scores)
@@ -371,6 +374,8 @@ def main():
     else:
         st.info("No scores yet — run `python -m monitor` once.")
 
+    st.caption("FIVE COUNTRIES · ONE TEAM")
+    st.caption("Read the legs your clients will travel — scored and explained.")
     st.subheader("Map")
     if scores:
         mdf = pd.DataFrame([s for s in scores if s["lat"] is not None])
@@ -382,6 +387,8 @@ def main():
                                font=dict(family="Source Sans 3, system-ui, sans-serif", size=13))
             st.plotly_chart(fig2, use_container_width=True)
 
+    st.caption("OUR APPROACH")
+    st.caption("Your clients and your brand — monitored before they travel.")
     st.subheader("14-day outlook")
     try:
         if db is not None and scores:
@@ -419,6 +426,8 @@ def main():
     except Exception as e:
         st.caption(f"Outlook unavailable: {e}")
 
+    st.caption("SEAMLESS COORDINATION")
+    st.caption("Escalations the moment they matter — never noise.")
     st.subheader("Alert feed")
     tier_filter = st.selectbox("Filter by tier", ["All", "Green", "Watch", "Act"])
     kind_filter = st.selectbox("Filter by kind", ["All", "ESCALATED", "DE-ESCALATED", "CLOSED"])
@@ -432,6 +441,8 @@ def main():
         st.markdown(f"**{a.get('created_at','')[:16]}** · {a.get('kind','')} · {a.get('prev_tier','')} → **{ICON.get(tier, '⚪')} {tier}**")
         st.code(a.get("text", ""))
 
+    st.caption("DISCRETION & BRAND ALIGNMENT")
+    st.caption("End-to-end management, with 24/7 quiet care.")
     st.subheader("Feed health")
     if health:
         st.dataframe(pd.DataFrame(health), use_container_width=True)
