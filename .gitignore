@@ -1,3 +1,6 @@
 .worktrees/
 .superpowers/sdd/
 __pycache__/
+.pytest_cache/
+*.db
+.env
